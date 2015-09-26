@@ -1,0 +1,17 @@
+---
+title: "Sever Weather Events And Their Effects on Economy and Public Health"
+output: html_document
+---
+
+#Synopsis
+
+In this report we would analyze the NOAA Storm Databsase to explore the relationship between sever weather events and their effects both economically and to the public health.
+
+#Data Processing
+
+##Preprocessing
+We would first need to download the file into our computer and unzip it. Then we would read the file into a dataframe:
+
+```{r cache=TRUE}
+noaaDataset <- read.csv("repdata-data-StormData.csv")
+```
