@@ -13,5 +13,104 @@ In this report we would analyze the NOAA Storm Databsase to explore the relation
 We would first need to download the file into our computer and unzip it. Then we would read the file into a dataframe:
 
 ```{r cache=TRUE}
-noaaDataset <- read.csv("repdata-data-StormData.csv")
+noaaDataset <- read.csv(bzfile("repdata-data-StormData.csv.bz2"))
 ```
+
+We need the following packages for our analysis:
+```{r}
+library(ggplot2)
+library(reshape2)
+library(dplyr)
+```
+
+Firstly, we need to look at the question that we are trying to answer. We want to know the total effect of severe weather conditions on the public health and to the economy. A quick look at the column names and a quick skimming of the documentation accompanying the dataset reveals which specific columns in this dataset are needed for our analysis. 
+In order to have these columns in a tidy format for our analysis we need some tidying up to do. What follows is the different transformations needed for our dataset to be in the right format for our analysis.
+
+We will first look at the effect of these severe weather condition on human health. First, We will go through the data frame and standardize different event names that have been repeated with different labels:
+
+```{r cache=TRUE}
+noaaDataset[noaaDataset$EVTYPE == "FLASH FLOODING"|
+            noaaDataset$EVTYPE == "FLOOD"|
+            noaaDataset$EVTYPE == "COASTAL FLOOD",]$EVTYPE <- "FLASH FLOOD"
+noaaDataset[noaaDataset$EVTYPE == "HIGH WINDS",]$EVTYPE <- "HIGH WIND"
+noaaDataset[noaaDataset$EVTYPE == "HEAT",]$EVTYPE <- "EXCESSIVE HEAT"
+noaaDataset[noaaDataset$EVTYPE == "HURRICANE" |
+            noaaDataset$EVTYPE == "TYPHOON",]$EVTYPE <- "HURRICANE/TYPHOON"
+noaaDataset[noaaDataset$EVTYPE == "FREEZE",]$EVTYPE <- "FROST/FREEZE"
+noaaDataset[noaaDataset$EVTYPE == "HIGH WIND" |
+            noaaDataset$EVTYPE == "THUNDERSTORM WIND" |
+            noaaDataset$EVTYPE == "THUNDERSTORM WINDS" |
+            noaaDataset$EVTYPE == "TSTM WIND",]$EVTYPE <- "STRONG WIND"
+noaaDataset[noaaDataset$EVTYPE == "STORM SURGE" | 
+            noaaDataset$EVTYPE == "TIDE",]$EVTYPE <- "STORM SURGE/TIDE"
+noaaDataset[noaaDataset$EVTYPE == "WILD FIRES" | 
+            noaaDataset$EVTYPE == "WILDFIRE" | 
+            noaaDataset$EVTYPE == "FOREST FIRES",]$EVTYPE <- "WILD/FOREST FIRE"
+```
+
+#Results
+
+We would create a barplot that indicates the impact of any given weather condition on public health:
+
+```{r}
+
+byEvents <- aggregate(cbind(INJURIES,FATALITIES)~EVTYPE, data = noaaDataset, FUN=sum)
+byEvents <- byEvents[order(-byEvents$FATALITIES, -byEvents$INJURIES),][1:15,]
+moltenByEvents <- melt(byEvents[, c("EVTYPE", "FATALITIES", "INJURIES")], id.vars=c("EVTYPE"), variable.name="TYPE", value.name="TTL")
+ggplot(moltenByEvents, aes(x=EVTYPE, y=TTL, fill=TYPE)) + geom_bar(stat="identity")  + theme(axis.text.x = element_text(angle = 90, hjust = 1)) + labs(x="Weather Condition", y="Total Injured/Killed")
+
+```
+
+As evident from the figure, tornados with close to 80,000 fatalities and injuries are a huge outlier in the figure which makes it hard to compare the other conditions' effect. In order to look at the other conditions and how they compare, we would make another plot without the tornado data. 
+
+```{r}
+byEvents <- aggregate(cbind(INJURIES,FATALITIES)~EVTYPE, data = noaaDataset, FUN=sum)
+byEvents <- subset(byEvents, EVTYPE!="TORNADO")
+byEvents <- byEvents[order(-byEvents$FATALITIES, -byEvents$INJURIES),][1:15,]
+moltenByEvents <- melt(byEvents[, c("EVTYPE", "FATALITIES", "INJURIES")], id.vars=c("EVTYPE"), variable.name="TYPE", value.name="TTL")
+ggplot(moltenByEvents, aes(x=EVTYPE, y=TTL, fill=TYPE)) + geom_bar(stat="identity")  + theme(axis.text.x = element_text(angle = 90, hjust = 1)) + labs(x="Weather Condition", y="Total Injured/Killed")
+```
+
+The figure now shows a better spread of the data and we can see the different conditions that contribute to public health.  
+
+Now we will look at the economic consequences of these weather conditions. First for our analysis of the economic effect of these events we need to multiply the exponent of the amount to the amount to create a single column with the actual integer dollar amount of the damage. First we try to take a look at the different values exponents can take:
+
+```r levels(noaaDataset$PROPDMGEXP) ```
+
+As seen above, there are some strange values in this factor which are hard to decipher. Luckily the ones that we cannot decipher take a very small percentage of the data(```r sprintf("%3f", nrow(subset(noaaDataset, !(PROPDMGEXP %in% c("h", "H", "k", "K", "m", "M", "")))) / nrow(noaaDataset))```). So it is rather safe to ignore the rows that contain these values as their exponent. 
+
+```{r}
+multiplyExponent <- function(x)
+{
+  switch(as.character(x),
+  h =,
+  H = 100,
+  k =,
+  K = 1000, 
+  m =,
+  M = 1000000,
+  {0}
+  )
+}
+noaaDataset$PROPDMGEXPSTD <- as.numeric(sapply(noaaDataset$PROPDMGEXP, multiplyExponent)) * noaaDataset$PROPDMG
+noaaDataset$CROPDMGEXPSTD <- as.numeric(sapply(noaaDataset$CROPDMGEXP, multiplyExponent)) * noaaDataset$CROPDMG
+noaaDataset$TTLDMG<-noaaDataset$PROPDMGEXPSTD + noaaDataset$CROPDMGEXPSTD
+```
+
+After the total damage of each event has been calculated. What would be left after is just to create a bar plot of the results.
+
+```{r}
+noaaDataset<-subset(noaaDataset, TTLDMG > 0)
+noaaDataset$TTLDMGLOG<-log(noaaDataset$TTLDMG)
+noaaDataset<-noaaDataset[order(-noaaDataset$TTLDMG),]
+noaaDataSetLong <- melt(noaaDataset[, c("EVTYPE", "PROPDMGEXPSTD", "CROPDMGEXPSTD")], id.vars=c("EVTYPE"), value.name = "AMT") 
+
+damageByEvent <- subset(aggregate(AMT~EVTYPE+variable, data=noaaDataSetLong, sum), AMT > quantile(AMT, 0.98))
+ggplot(damageByEvent, aes(x=EVTYPE, y=AMT, fill=variable)) + geom_bar(stat="identity")  + theme(axis.text.x = element_text(angle = 90, hjust = 1)) + scale_fill_manual(values=c("brown", "darkgoldenrod"),name="Damage Type",
+breaks=c("PROPDMGEXPSTD", "CROPDMGEXPSTD"),
+labels=c("Property Damage", "Crop Damage")) + labs(x="Weather Condition", y="Amount")
+```
+
+#Summary
+
+As evident from this analysis, tornados take up the majority of human health and economic repercussions of sever weather conditions.
